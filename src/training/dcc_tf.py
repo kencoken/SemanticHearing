@@ -16,15 +16,21 @@ from torchmetrics.functional import(
 
 from speechbrain.lobes.models.transformer.Transformer import PositionalEncoding
 
-def mod_pad(x, chunk_size, pad):
+def mod_pad(x: Tensor, chunk_size: int, pad: tuple[int, int]):
     # Mod pad the input to perform integer number of
     # inferences
-    mod = 0
-    if (x.shape[-1] % chunk_size) != 0:
-        mod = chunk_size - (x.shape[-1] % chunk_size)
+
+    ## UPDATED below code to remove conditional branching
+    # mod = 0
+    # if (x.shape[-1] % chunk_size) != 0:
+    #     mod = chunk_size - (x.shape[-1] % chunk_size)
+    # mod = get_mod(x, chunk_size)
+    chunk_divisible_len = (x.shape[-1] // chunk_size +
+                           min(1, x.shape[-1] % chunk_size)) * chunk_size
+    mod = chunk_divisible_len - x.shape[-1]
 
     x = F.pad(x, (0, mod))
-    x = F.pad(x, pad)
+    x = F.pad(x, pad)  # add pad[0] and pad[1] to either end of last dimension
 
     return x, mod
 
@@ -320,8 +326,7 @@ class CausalTransformerDecoder(nn.Module):
 
         # Remove the mod padding
         output = output.permute(0, 2, 1)
-        if mod != 0:
-            output = output[:, :, :-mod]
+        output = remove_padding_if_present(output, mod)
 
         return output, ctx_buf
 
@@ -505,6 +510,12 @@ def metrics(mixed, output, gt):
                                           gt)
 
     return metrics
+
+@torch.jit.script
+def remove_padding_if_present(x: Tensor, mod: int):
+    if mod != 0:
+        x = x[:, :, :-mod]
+    return x
 
 if __name__ == '__main__':
     net = CausalTransformerDecoder(
